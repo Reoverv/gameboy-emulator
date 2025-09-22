@@ -1,6 +1,8 @@
 package main
 
+import "core:bufio"
 import fmt "core:fmt"
+import "core:os"
 
 cpu_context :: struct {
 	register:           register,
@@ -11,9 +13,7 @@ cpu_context :: struct {
 	halted:             bool,
 }
 
-unregister :: proc() {
-	hello: string = "Hello"
-}
+cpu: cpu_context = {}
 
 register :: struct {
 	AF: u16,
@@ -24,10 +24,6 @@ register :: struct {
 	PC: u16, // Program Counter/Pointer
 }
 
-cpu := cpu_context {
-	halted = false,
-}
-
 getUpperRegister :: proc(register: u16) -> u8 {
 	return u8(register >> 8)
 }
@@ -36,15 +32,20 @@ getLowerRegister :: proc(register: u16) -> u8 {
 	return u8(register)
 }
 
+formatFlags :: proc() -> string {
+	return fmt.tprintfln(
+		"Z: %d, N: %d, H: %d, C: %d",
+		getZFlag(),
+		getNFlag(),
+		getHFlag(),
+		getCFlag(),
+	)
+}
 
 setUpperRegister :: proc(registerPtr: ^u16, value: u8) {
-    
 	lowerBits := registerPtr^ & 0x00FF
-
 	upperBits := u16(value) << 8
-
 	registerPtr^ = upperBits | lowerBits
-
 }
 
 setLowerRegister :: proc(registerPtr: ^u16, value: u8) {
@@ -91,9 +92,7 @@ getCFlag :: proc() -> u8 {
 	return (getLowerRegister(cpu.register.AF) >> 4) & 0x01
 }
 
-
 fetchData :: proc() {
-
 	if cpu.currentInstruction.lenght == 2 {
 		high := memory[cpu.register.PC + 2]
 		low := memory[cpu.register.PC + 1]
@@ -109,33 +108,41 @@ fetchData :: proc() {
 	}
 
 	value := memory[cpu.register.PC + cpu.currentInstruction.lenght]
-
 	cpu.fetchedData = u16(value)
 }
 
 printRegToHex :: proc() -> string {
 	return fmt.tprintfln(
-		"AF: 0x%s | BC: 0x%s | DE: 0x%s | HL: 0x%s | SP: 0x%s | PC: 0x%s\nFlags: %b",
-		decimalToHex(cpu.register.AF),
-		decimalToHex(cpu.register.BC),
-		decimalToHex(cpu.register.DE),
-		decimalToHex(cpu.register.HL),
-		decimalToHex(cpu.register.SP),
-		decimalToHex(cpu.register.PC),
-		getLowerRegister(cpu.register.AF),
+		"AF: 0x%s | BC: 0x%s | DE: 0x%s | HL: 0x%s | SP: 0x%s | PC: 0x%s\nFlags: %s",
+		decimalToHex16(cpu.register.AF),
+		decimalToHex16(cpu.register.BC),
+		decimalToHex16(cpu.register.DE),
+		decimalToHex16(cpu.register.HL),
+		decimalToHex16(cpu.register.SP),
+		decimalToHex16(cpu.register.PC),
+		formatFlags(),
 	)
-
 }
 
 run :: proc() {
+	debug := true
 
 	for !cpu.halted {
 		curInstruction := memory[cpu.register.PC]
 		cpu.currentInstruction = instructions[curInstruction]
 		cpu.currentOpCode = u16(curInstruction)
 
+		// Use bufio to read a line instead
+
+
 		fetchData()
-		runInstruction()
+		has_run := runInstruction()
+
+		if has_run && debug {
+			line_buf := make([]u8, 1024)
+			defer delete(line_buf)
+			os.read(os.stdin, line_buf)
+		}
 
 		if cpu.register.PC >= len(memory) - 1 {
 			cpu.halted = true

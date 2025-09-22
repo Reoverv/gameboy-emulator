@@ -9,8 +9,11 @@ rom: []string
 
 main :: proc() {
 
+    debug : bool = true
+    
+    initializeSystem()
 
-	loadCartridge("/Users/remco.overvliet/ownCloud/Programming/GBEmulator/tests/09-op r,r.gb")
+	loadCartridge("/Users/remco.overvliet/ownCloud/Programming/GBEmulator/tests/03.gb")
 
 
 	run()

@@ -76,7 +76,7 @@ loadCartridge :: proc (locaction: string) {
     for i in 0 ..< 0x2{
         cart.globalChecksum[i] = memory[0x14E + i]
     }
-
+    
 }
 
 newPublishersMap := map[string]string{

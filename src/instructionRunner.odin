@@ -3,7 +3,7 @@ package main
 import fmt "core:fmt"
 import os "core:os"
 
-runInstruction :: proc() {
+runInstruction :: proc() -> bool {
 
 	currentInstruction: instruction = cpu.currentInstruction
 	fetchedData := cpu.fetchedData
@@ -61,6 +61,7 @@ runInstruction :: proc() {
 		case .MR_R:
 			loadH_memory_register_or_num(currentInstruction.reg2, fetchedData)
 		case .R_MR:
+			loadH_register_memory(currentInstruction.reg2, fetchedData)
 		}
 	case .INC:
 		#partial switch currentInstruction.addrMode {
@@ -102,9 +103,7 @@ runInstruction :: proc() {
 				currentInstruction.register2Size,
 			)
 		case .R_MR:
-			sub_register_memory(
-				fetchedData
-			)
+			sub_register_memory(fetchedData)
 
 		}
 	case .ADC:
@@ -151,10 +150,10 @@ runInstruction :: proc() {
 	case .RET:
 		fmt.println(cpu.currentInstruction.lenght)
 		ret_cc(currentInstruction.cc)
-		return
+		return true
 	case .RETI:
 		reti_cc(currentInstruction.cc)
-		return
+		return true
 	case .POP:
 		pop_register(currentInstruction.reg1)
 	case .CALL:
@@ -179,24 +178,28 @@ runInstruction :: proc() {
 				{
 					jr_e8(cpu.fetchedData, currentInstruction.cc)
 					fmt.printfln(printRegToHex())
-					return
+					return true
 				}
 			case .C_N16:
 				{
-					jp_n16(cpu.fetchedData, currentInstruction.cc)
+					jr_n16(cpu.fetchedData, currentInstruction.cc)
 					fmt.printfln(printRegToHex())
-					return
+					return true
 				}
 
 			}
 		}
 	case .HALT:
-		os.exit(99) // TODO: HALT Not yet implemented
-	case .DI: // TODO: DI Not yet implemented
-	case .EI: // TODO: EI Not yet implemented,
+		os.exit(99) // TODO: HALT Not yet implemented. SKIP FOR NOW WILL IMPLMENT LATER
+	case .DI:
+		os.exit(0xf3) // TODO: DI Not yet implemented. SKIP FOR NOW WILL IMPLMENT LATER
+	case .EI:
+		os.exit(0xfb) // TODO: EI Not yet implemented. SKIP FOR NOW WILL IMPLMENT LATER
 	case .PREFIX:
 		{
-			// TODO: PREFIX Not yet implemented
+			prefix_instruction := decimalToHex8(u8(fetchedData))
+			fmt.println(prefix_instruction)
+			// TODO: PREFIX Not yet implemented. SKIP FOR NOW WILL IMPLMENT LATER
 			fmt.println("Prefix not yet implemented")
 			os.exit(-69)
 		}
@@ -204,7 +207,7 @@ runInstruction :: proc() {
 		{
 			jp_n16(cpu.fetchedData, currentInstruction.cc)
 			fmt.printfln(printRegToHex())
-			return
+			return true
 		}
 	case .SCF:
 		{
@@ -276,12 +279,16 @@ runInstruction :: proc() {
 		os.exit(1)
 	}
 
+	cpu.register.PC += cpu.currentInstruction.lenght + 1
+
 	if cpu.currentOpCode != 0 {
 
 		fmt.printfln(printRegToHex())
+		return true
 	}
 
-	cpu.register.PC += cpu.currentInstruction.lenght + 1
+
+	return false
 
 }
 
@@ -359,7 +366,6 @@ load_memory_register_or_num :: proc(
 		u8(data),
 	)
 
-
 	#partial switch half {
 	case .UPPER:
 		writeMem(reg^, getUpperRegister(reg2^))
@@ -378,41 +384,34 @@ load_memory_register_or_num :: proc(
 	}
 
 	fmt.printfln("Memory: %02X", memory[reg^])
-		
+
 }
 
+
 loadH_memory_register_or_num :: proc(register: RegisterType, data: u16) {
-	reg := getRegisterFromType(register)
 	regA := getUpperRegister(cpu.register.AF)
 
-
-	if data >= 0xFF00 || data <= 0xFFFF && register == RegisterType.NONE {
-		writeMem(data, regA)
-		return
+	if register == RegisterType.NONE {
+		writeMem(0xFF00 + data, regA)
+		fmt.println("Memory written:", readMem(0xFF00 + data))
+	} else {
+		regC := getLowerRegister(cpu.register.BC)
+		writeMem(0xFF00 + u16(regC), regA)
+		fmt.println("Memory written at C register: ", readMem(0xFF00 + u16(regC)))
 	}
-
-	regC := getLowerRegister(cpu.register.PC)
-
-	writeMem(0xFF00 + u16(regC), regA)
 
 
 }
 
 loadH_register_memory :: proc(register: RegisterType, data: u16) {
-	reg := getRegisterFromType(register)
-	regA := getUpperRegister(cpu.register.AF)
+	reg := getRegisterFromType(RegisterType.A)
 
-
-	if data >= 0xFF00 || data <= 0xFFFF && register == RegisterType.NONE {
-		setUpperRegister(reg, memory[data])
-		return
+	if register == RegisterType.NONE {
+		setUpperRegister(reg, readMem(0xFF00 + data))
+	} else {
+		regC := getLowerRegister(cpu.register.BC)
+		setUpperRegister(reg, readMem(0xFF00 + u16(regC)))
 	}
-
-	regC := getLowerRegister(cpu.register.PC)
-
-	setUpperRegister(reg, memory[regC])
-
-
 }
 
 load_at_memory_register :: proc(register2: RegisterType, data: u16, half: registerHalf) {
@@ -502,7 +501,6 @@ inc_memory :: proc(register: RegisterType, half: registerHalf) {
 
 
 }
-
 
 daa :: proc() {
 
@@ -779,8 +777,8 @@ cp_register_num :: proc(data: u16) {
 	value2 := u8(data)
 	result := value - value2
 
-	cCarry: bool = value - value2 < value
-	hCarry: bool = (value2 & 0x0F) - (value & 0x0F) > 0x0F
+	cCarry: bool = value < value2
+	hCarry: bool = (value & 0x0F) < (value2 & 0x0F)
 
 	setCFlag(cCarry ? 1 : 0)
 	setHFlag(hCarry ? 1 : 0)
@@ -849,35 +847,40 @@ sub_register_register :: proc(register1, register2: RegisterType, half1, half2: 
 		value1 := getUpperRegister(cpu.register.AF)
 		value2 := getUpperRegister(reg2^)
 
-		hCarry: bool = ((value1 & 0x0F) < (value2 & 0x0F))
-		cCarry: bool = value1 - value2 < value1
+		hCarry: bool = (value1 & 0x0F) < (value2 & 0x0F)
+		cCarry: bool = value1 < value2
 		zCarry: bool = value1 - value2 == 0
 		setUpperRegister(&cpu.register.AF, value1 - value2)
 		setCFlag(cCarry ? 1 : 0)
 		setHFlag(hCarry ? 1 : 0)
-		setNFlag(0)
+		setNFlag(1)
 		setZFlag(zCarry ? 1 : 0)
+
 	case .LOWER:
 		value1 := getUpperRegister(cpu.register.AF)
 		value2 := getLowerRegister(reg2^)
 
-		hCarry: bool = ((value1 & 0x0F) - (value2 & 0x0F)) > 0x0F
-		cCarry: bool = value1 - value2 < value1
+		hCarry: bool = (value1 & 0x0F) < (value2 & 0x0F)
+		cCarry: bool = value1 < value2
 		zCarry: bool = value1 - value2 == 0
 		setUpperRegister(&cpu.register.AF, value1 - value2)
 		setCFlag(cCarry ? 1 : 0)
 		setHFlag(hCarry ? 1 : 0)
-		setNFlag(0)
+		setNFlag(1)
 		setZFlag(zCarry ? 1 : 0)
 
 	case .ALL:
-		hCarry: bool = (reg^ & 0x0FFF) - (reg^ & 0x0FFF) > 0x0FFF
-		cCarry: bool = reg^ - reg2^ < reg^
+		value1 := reg^
+		value2 := reg2^
+		result := value1 - value2
+
+		hCarry: bool = (value1 & 0x0FFF) < (value2 & 0x0FFF)
+		cCarry: bool = value1 < value2 // Fixed
 
 		setCFlag(cCarry ? 1 : 0)
 		setHFlag(hCarry ? 1 : 0)
-		setNFlag(0)
-		reg^ -= reg2^
+		setNFlag(1)
+		reg^ = result
 	}
 }
 
@@ -887,8 +890,8 @@ sub_register_memory :: proc(data: u16) {
 	value1 := getUpperRegister(cpu.register.AF)
 	value2 := memory[data]
 
-	hCarry: bool = ((value1 & 0x0F) - (value2 & 0x0F)) > 0x0F
-	cCarry: bool = value1 - value2 < value1
+	hCarry: bool = (value1 & 0x0F) < (value2 & 0x0F)
+	cCarry: bool = value1 < value2
 	zCarry: bool = value1 - value2 == 0
 	setUpperRegister(&cpu.register.AF, value1 - value2)
 	setCFlag(cCarry ? 1 : 0)
@@ -1028,6 +1031,21 @@ jr_e8 :: proc(data: u16, cc: conditionCode) {
 	}
 }
 
+jr_n16 :: proc(data: u16, cc: conditionCode) {
+
+	if (cc == conditionCode.NZ && getZFlag() == 0) ||
+	   (cc == conditionCode.Z && getZFlag() == 1) ||
+	   (cc == conditionCode.C && getCFlag() == 1) ||
+	   (cc == conditionCode.NC && getCFlag() == 0) ||
+	   cc == conditionCode.NONE {
+		cpu.register.PC += data
+
+	} else {
+		cpu.register.PC += 3
+		cpu.currentInstruction.cycles = 12
+	}
+}
+
 jp_n16 :: proc(data: u16, cc: conditionCode) {
 
 	if (cc == conditionCode.NZ && getZFlag() == 0) ||
@@ -1037,7 +1055,8 @@ jp_n16 :: proc(data: u16, cc: conditionCode) {
 	   cc == conditionCode.NONE {
 		cpu.register.PC = data
 	} else {
-		cpu.register.PC += 2
+		cpu.register.PC += 3
+		cpu.currentInstruction.cycles = 8
 	}
 }
 
@@ -1077,7 +1096,10 @@ ret_cc :: proc(cc: conditionCode) {
 		cpu.register.SP += 1
 
 		cpu.register.PC = u16(lower) | (u16(upper) << 8)
+		return
 	}
+
+	cpu.currentInstruction.cycles = 8
 }
 
 reti_cc :: proc(cc: conditionCode) {
@@ -1101,7 +1123,9 @@ call_cc :: proc(data: u16, cc: conditionCode) {
 		memory[cpu.register.SP - 2] = getUpperRegister(cpu.register.PC)
 		cpu.register.SP -= 2
 		cpu.register.PC = data
+		return
 	}
+	cpu.currentInstruction.cycles = 12
 }
 
 push_register :: proc(register: RegisterType) {
